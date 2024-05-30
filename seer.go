@@ -1,15 +1,73 @@
 package seer
 
-import "strings"
+import (
+	"fmt"
+	"regexp"
+	"runtime"
+	"strings"
+)
 
 var (
 	collectRuntimeInfo = true
 	defaultMessage     = "an error occurred"
 )
 
-type seer struct {
+type Seer struct {
 	op            string
 	originalError error
+	message       string
+
+	// runtime info
+	caller string
+	file   string
+	line   int
+}
+
+type SeerInterface interface {
+	error
+	fmt.Stringer
+}
+
+func (s Seer) Error() string {
+	if collectRuntimeInfo {
+		callerName := s.caller
+		return fmt.Sprintf("%s:%d (%s::%s): %s", s.file, s.line, callerName, s.op, s.message)
+	} else {
+		return fmt.Sprintf("%s: %s", s.op, s.message)
+	}
+}
+
+func (s Seer) String() string {
+	var sb strings.Builder
+
+	defer sb.Reset() // Deallocate the string builder
+
+	if collectRuntimeInfo {
+		callerName := s.caller
+		sb.WriteString(fmt.Sprintf("%s:%d (%s::%s)", s.file, s.line, callerName, s.op))
+	} else {
+		sb.WriteString(fmt.Sprintf("%s: %s", s.op, s.message))
+	}
+
+	if s.originalError != nil {
+		sb.WriteString(fmt.Sprintf("\n\tWrapped error: %s", s.originalError.Error()))
+	}
+
+	return sb.String()
+}
+
+func New(op string, message string) error {
+	var (
+		caller string
+		file   string
+		line   int
+	)
+
+	if collectRuntimeInfo {
+		caller, file, line = getRuntimeInfo()
+	}
+
+	return Seer{op: op, message: message, file: file, caller: caller, line: line}
 }
 
 /**
@@ -22,8 +80,40 @@ type seer struct {
 * }
 *````
 **/
-func WrapError(op string, originalError error, customMessage ..string) error {
-	return nil
+func WrapError(op string, originalError error, customMessage ...string) error {
+	seerError := Seer{op: op, originalError: originalError}
+
+	if len(customMessage) > 0 {
+		seerError.message = customMessage[0]
+	} else {
+		seerError.message = defaultMessage
+	}
+
+	if collectRuntimeInfo {
+		seerError.caller, seerError.file, seerError.line = getRuntimeInfo()
+	}
+
+	return seerError
+}
+
+// Unlike `QuickWrap`, `WrapWithStackTrace` is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace regardess of the `collectRuntimeInfo` flag.
+func WrapWithStackTrace(op string, originalError error, customMessage ...string) error {
+	var (
+		caller  string
+		file    string
+		line    int
+		message string
+	)
+
+	if len(customMessage) > 0 {
+		message = customMessage[0]
+	} else {
+		message = defaultMessage
+	}
+
+	caller, file, line = getRuntimeInfo()
+
+	return Seer{op: op, originalError: originalError, message: message, file: file, caller: caller, line: line}
 }
 
 var Wrap = WrapError
@@ -39,3 +129,22 @@ func SetDefaultMessage(message string) {
 func SetCollectRuntimeData(flag bool) {
 	collectRuntimeInfo = flag
 }
+
+func getRuntimeInfo() (string, string, int) {
+	pc, file, line, ok := runtime.Caller(2)
+	if !ok {
+		return "", "", 0
+	}
+
+	caller := runtime.FuncForPC(pc).Name()
+
+	// Extract the function name from the caller (thing.Foo.func1 -> Foo)
+	caller = caller[strings.LastIndex(caller, "/")+1:]
+
+	// Remove the funcN suffix
+	caller = regexp.MustCompile(`\.(func\d+)$`).ReplaceAllString(caller, "")
+
+	return caller, file, line
+}
+
+var _ SeerInterface = Seer{}
