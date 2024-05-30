@@ -1,6 +1,7 @@
 package seer
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"runtime"
@@ -8,8 +9,9 @@ import (
 )
 
 var (
-	collectRuntimeInfo = true
-	defaultMessage     = "an error occurred"
+	funcSuffixRegex   = regexp.MustCompile(`\.(func\d+)$`)
+	collectStackTrace = true
+	defaultMessage    = "an error occurred"
 )
 
 type Seer struct {
@@ -26,10 +28,17 @@ type Seer struct {
 type SeerInterface interface {
 	error
 	fmt.Stringer
+	json.Marshaler
 }
 
+// Error returns our user-defined error message, useful for direct responses to the user.
 func (s Seer) Error() string {
-	if collectRuntimeInfo {
+	return s.message
+}
+
+// ErrorWithStackTrace returns the error message with a bit more details, useful for debugging and logging
+func (s Seer) ErrorWithStackTrace() string {
+	if collectStackTrace {
 		callerName := s.caller
 		return fmt.Sprintf("%s:%d (%s::%s): %s", s.file, s.line, callerName, s.op, s.message)
 	} else {
@@ -37,12 +46,18 @@ func (s Seer) Error() string {
 	}
 }
 
+// UnwrapError returns the original error and a boolean indicating whether the original error is a Seer error and can be further unwrapped.
+func (s Seer) UnwrapError() (error, bool) {
+	_, nextErrorIsSeerError := s.originalError.(Seer)
+	return s.originalError, nextErrorIsSeerError
+}
+
 func (s Seer) String() string {
 	var sb strings.Builder
 
 	defer sb.Reset() // Deallocate the string builder
 
-	if collectRuntimeInfo {
+	if collectStackTrace {
 		callerName := s.caller
 		sb.WriteString(fmt.Sprintf("%s:%d (%s::%s)", s.file, s.line, callerName, s.op))
 	} else {
@@ -56,6 +71,32 @@ func (s Seer) String() string {
 	return sb.String()
 }
 
+// MarshalJSON returns a JSON representation of the Seer error, satisfying the json.Marshaler interface.
+func (s Seer) MarshalJSON() ([]byte, error) {
+	data := make(map[string]interface{})
+
+	data["operation"] = s.op
+	data["message"] = s.message
+
+	if collectStackTrace && (s.caller != "" || s.file != "" || s.line != 0) {
+		data["caller"] = s.caller
+		data["file"] = s.file
+		data["line"] = s.line
+	}
+
+	if s.originalError != nil {
+		data["previous_error"] = s.originalError.Error()
+	}
+
+	return json.Marshal(data)
+}
+
+// UnmarshalJSON is a no-op function that satisfies the json.Unmarshaler interface.
+func (s Seer) UnmarshalJSON(data []byte) error {
+	return nil
+}
+
+// New creates a new Seer error with the given operation name and message.
 func New(op string, message string) error {
 	var (
 		caller string
@@ -63,7 +104,7 @@ func New(op string, message string) error {
 		line   int
 	)
 
-	if collectRuntimeInfo {
+	if collectStackTrace {
 		caller, file, line = getRuntimeInfo()
 	}
 
@@ -80,7 +121,7 @@ func New(op string, message string) error {
 * }
 *````
 **/
-func WrapError(op string, originalError error, customMessage ...string) error {
+func Wrap(op string, originalError error, customMessage ...string) error {
 	seerError := Seer{op: op, originalError: originalError}
 
 	if len(customMessage) > 0 {
@@ -89,7 +130,7 @@ func WrapError(op string, originalError error, customMessage ...string) error {
 		seerError.message = defaultMessage
 	}
 
-	if collectRuntimeInfo {
+	if collectStackTrace {
 		seerError.caller, seerError.file, seerError.line = getRuntimeInfo()
 	}
 
@@ -116,8 +157,6 @@ func WrapWithStackTrace(op string, originalError error, customMessage ...string)
 	return Seer{op: op, originalError: originalError, message: message, file: file, caller: caller, line: line}
 }
 
-var Wrap = WrapError
-
 // SetDefaultMessage sets the default message that will be used when a custom message is not provided.
 func SetDefaultMessage(message string) {
 	if strings.TrimSpace(message) != "" {
@@ -126,8 +165,8 @@ func SetDefaultMessage(message string) {
 }
 
 // SetCollectRuntimeData controls collecting runtime info. Defaults to false
-func SetCollectRuntimeData(flag bool) {
-	collectRuntimeInfo = flag
+func SetCollectStackTrace(flag bool) {
+	collectStackTrace = flag
 }
 
 func getRuntimeInfo() (string, string, int) {
@@ -142,7 +181,7 @@ func getRuntimeInfo() (string, string, int) {
 	caller = caller[strings.LastIndex(caller, "/")+1:]
 
 	// Remove the funcN suffix
-	caller = regexp.MustCompile(`\.(func\d+)$`).ReplaceAllString(caller, "")
+	caller = funcSuffixRegex.ReplaceAllString(caller, "")
 
 	return caller, file, line
 }
