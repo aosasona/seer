@@ -29,11 +29,22 @@ type SeerInterface interface {
 	error
 	fmt.Stringer
 	json.Marshaler
+	json.Unmarshaler
 }
 
 // Error returns our user-defined error message, useful for direct responses to the user.
 func (s Seer) Error() string {
 	return s.message
+}
+
+// Operation returns the operation name that was passed to the Seer error.
+func (s Seer) Operation() string {
+	return s.op
+}
+
+// OriginalError returns the original error that was wrapped by the Seer error.
+func (s Seer) OriginalError() error {
+	return s.originalError
 }
 
 // ErrorWithStackTrace returns the error message with a bit more details, useful for debugging and logging
@@ -52,6 +63,7 @@ func (s Seer) UnwrapError() (error, bool) {
 	return s.originalError, nextErrorIsSeerError
 }
 
+// String returns a string representation of the Seer error (stack trace included if `collectStackTrace` is set to true) that is useful for logging.
 func (s Seer) String() string {
 	var sb strings.Builder
 
@@ -97,7 +109,7 @@ func (s Seer) UnmarshalJSON(data []byte) error {
 }
 
 // New creates a new Seer error with the given operation name and message.
-func New(op string, message string) error {
+func New(operation string, message string) error {
 	var (
 		caller string
 		file   string
@@ -108,19 +120,21 @@ func New(op string, message string) error {
 		caller, file, line = getRuntimeInfo()
 	}
 
-	return Seer{op: op, message: message, file: file, caller: caller, line: line}
+	return Seer{op: operation, message: message, file: file, caller: caller, line: line}
 }
 
-/**
+/*
+*
 * WrapError is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace.
 *
 * Usage:
 * ```go
 * if _, err := doThing(); err != nil {
-*   return seer.WrapError("doThing", err, "failed to do the thing")
+*   return seer.Wrap("doThing", err, "failed to do the thing")
 * }
 *````
-**/
+*
+ */
 func Wrap(op string, originalError error, customMessage ...string) error {
 	seerError := Seer{op: op, originalError: originalError}
 
@@ -137,8 +151,9 @@ func Wrap(op string, originalError error, customMessage ...string) error {
 	return seerError
 }
 
-// Unlike `QuickWrap`, `WrapWithStackTrace` is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace regardess of the `collectRuntimeInfo` flag.
-func WrapWithStackTrace(op string, originalError error, customMessage ...string) error {
+// Unlike `Wrap`, `WrapWithStackTrace` is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace regardess of the `collectRuntimeInfo` flag.
+// `operation` is the name of the operation that failed, to provide more context.
+func WrapWithStackTrace(operation string, originalError error, customMessage ...string) error {
 	var (
 		caller  string
 		file    string
@@ -154,7 +169,14 @@ func WrapWithStackTrace(op string, originalError error, customMessage ...string)
 
 	caller, file, line = getRuntimeInfo()
 
-	return Seer{op: op, originalError: originalError, message: message, file: file, caller: caller, line: line}
+	return Seer{
+		op:            operation,
+		originalError: originalError,
+		message:       message,
+		file:          file,
+		caller:        caller,
+		line:          line,
+	}
 }
 
 // SetDefaultMessage sets the default message that will be used when a custom message is not provided.
