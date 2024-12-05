@@ -33,22 +33,22 @@ type SeerInterface interface {
 }
 
 // Error returns our user-defined error message, useful for direct responses to the user.
-func (s Seer) Error() string {
-	return s.message
+func (s *Seer) Error() string {
+	return s.message // message is always set to either user-defined message or default message
 }
 
 // Operation returns the operation name that was passed to the Seer error.
-func (s Seer) Operation() string {
+func (s *Seer) Operation() string {
 	return s.op
 }
 
 // OriginalError returns the original error that was wrapped by the Seer error.
-func (s Seer) OriginalError() error {
+func (s *Seer) OriginalError() error {
 	return s.originalError
 }
 
 // ErrorWithStackTrace returns the error message with a bit more details, useful for debugging and logging
-func (s Seer) ErrorWithStackTrace() string {
+func (s *Seer) ErrorWithStackTrace() string {
 	if collectStackTrace {
 		callerName := s.caller
 		return fmt.Sprintf("%s:%d (%s::%s): %s", s.file, s.line, callerName, s.op, s.message)
@@ -58,13 +58,13 @@ func (s Seer) ErrorWithStackTrace() string {
 }
 
 // UnwrapError returns the original error and a boolean indicating whether the original error is a Seer error and can be further unwrapped.
-func (s Seer) UnwrapError() (error, bool) {
-	_, nextErrorIsSeerError := s.originalError.(Seer)
+func (s *Seer) UnwrapError() (error, bool) {
+	_, nextErrorIsSeerError := s.originalError.(*Seer)
 	return s.originalError, nextErrorIsSeerError
 }
 
 // String returns a string representation of the Seer error (stack trace included if `collectStackTrace` is set to true) that is useful for logging.
-func (s Seer) String() string {
+func (s *Seer) String() string {
 	var sb strings.Builder
 
 	defer sb.Reset() // Deallocate the string builder
@@ -84,7 +84,7 @@ func (s Seer) String() string {
 }
 
 // MarshalJSON returns a JSON representation of the Seer error, satisfying the json.Marshaler interface.
-func (s Seer) MarshalJSON() ([]byte, error) {
+func (s *Seer) MarshalJSON() ([]byte, error) {
 	data := make(map[string]interface{})
 
 	data["operation"] = s.op
@@ -120,21 +120,36 @@ func New(operation string, message string) error {
 		caller, file, line = getRuntimeInfo()
 	}
 
-	return Seer{op: operation, message: message, file: file, caller: caller, line: line}
+	errCode := 500
+	if len(code) > 0 {
+		errCode = code[0]
+
+		if errCode < 100 || errCode > 599 {
+			slog.
+				Warn(fmt.Sprintf("Invalid error code %d. Defaulting to 500", errCode))
+			errCode = 500
+		}
+	}
+
+	return &Seer{
+		op:      operation,
+		message: message,
+		code:    errCode,
+		file:    file,
+		caller:  caller,
+		line:    line,
+	}
 }
 
 /*
-*
-* WrapError is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace.
-*
-* Usage:
-* ```go
-* if _, err := doThing(); err != nil {
-*   return seer.Wrap("doThing", err, "failed to do the thing")
-* }
-*````
-*
- */
+WrapError is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace.
+
+Usage:
+
+	if _, err := doThing(); err != nil {
+	  return seer.Wrap("doThing", err, "failed to do the thing", 400)
+	}
+*/
 func Wrap(op string, originalError error, customMessage ...string) error {
 	seerError := Seer{op: op, originalError: originalError}
 
@@ -148,7 +163,7 @@ func Wrap(op string, originalError error, customMessage ...string) error {
 		seerError.caller, seerError.file, seerError.line = getRuntimeInfo()
 	}
 
-	return seerError
+	return &seerError
 }
 
 // Unlike `Wrap`, `WrapWithStackTrace` is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace regardess of the `collectRuntimeInfo` flag.
@@ -169,7 +184,7 @@ func WrapWithStackTrace(operation string, originalError error, customMessage ...
 
 	caller, file, line = getRuntimeInfo()
 
-	return Seer{
+	return &Seer{
 		op:            operation,
 		originalError: originalError,
 		message:       message,
@@ -208,4 +223,4 @@ func getRuntimeInfo() (string, string, int) {
 	return caller, file, line
 }
 
-var _ SeerInterface = Seer{}
+var _ SeerInterface = (*Seer)(nil)
