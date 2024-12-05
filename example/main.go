@@ -8,7 +8,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Print(err)
+		fmt.Printf("Error: %s, Code: %d\n", err, err.(*seer.Seer).Code())
 	}
 }
 
@@ -19,15 +19,16 @@ func run() error {
 
 	_, err := fmt.Scan(&val)
 	if err != nil {
-		return seer.Wrap("collectInput", err)
+		return seer.Wrap("collectInput", err).WithCode(500)
 	}
 
 	if val <= 0 {
-		return seer.New("validateInput", fmt.Sprintf("negative number or zero: %d", val))
+		return seer.New("validateInput", fmt.Sprintf("negative number or zero: %d", val)).
+			WithCode(400)
 	}
 
 	if val%2 == 0 {
-		return seer.New("validateInput", fmt.Sprintf("even number: %d", val))
+		return seer.New("validateInput", fmt.Sprintf("even number: %d", val)).WithCode(400)
 	}
 
 	return nil
