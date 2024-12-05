@@ -3,6 +3,7 @@ package seer
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"runtime"
 	"strings"
@@ -11,13 +12,16 @@ import (
 var (
 	funcSuffixRegex   = regexp.MustCompile(`\.(func\d+)$`)
 	collectStackTrace = true
-	defaultMessage    = "an error occurred"
+
+	defaultCode    = 500
+	defaultMessage = "an error occurred"
 )
 
 type Seer struct {
 	op            string
 	originalError error
 	message       string
+	code          int
 
 	// runtime info
 	caller string
@@ -30,6 +34,26 @@ type SeerInterface interface {
 	fmt.Stringer
 	json.Marshaler
 	json.Unmarshaler
+}
+
+// Code returns the error code that was set on the Seer error.
+func (s *Seer) Code() int {
+	if s.code == 0 {
+		return defaultCode
+	}
+
+	return s.code
+}
+
+// WithCode sets the error code on the Seer error.
+func (s *Seer) WithCode(code int) *Seer {
+	if code < 100 || code > 599 {
+		slog.Warn(fmt.Sprintf("Invalid error code %d. Defaulting to 500", code))
+		return s
+	}
+
+	s.code = code
+	return s
 }
 
 // Error returns our user-defined error message, useful for direct responses to the user.
@@ -104,12 +128,12 @@ func (s *Seer) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON is a no-op function that satisfies the json.Unmarshaler interface.
-func (s Seer) UnmarshalJSON(data []byte) error {
+func (s *Seer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
 // New creates a new Seer error with the given operation name and message.
-func New(operation string, message string) error {
+func New(operation string, message string, code ...int) error {
 	var (
 		caller string
 		file   string
@@ -204,6 +228,15 @@ func SetDefaultMessage(message string) {
 // SetCollectRuntimeData controls collecting runtime info. Defaults to false
 func SetCollectStackTrace(flag bool) {
 	collectStackTrace = flag
+}
+
+func SetDefaultCode(code int) {
+	if code < 100 || code > 599 {
+		slog.Warn(fmt.Sprintf("Invalid error code %d. Defaulting to 500", code))
+		return
+	}
+
+	defaultCode = code
 }
 
 func getRuntimeInfo() (string, string, int) {
