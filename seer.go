@@ -48,7 +48,7 @@ func (s *Seer) Code() int {
 // WithCode sets the error code on the Seer error.
 func (s *Seer) WithCode(code int) *Seer {
 	if code < 100 || code > 599 {
-		slog.Warn(fmt.Sprintf("Invalid error code %d. Defaulting to 500", code))
+		slog.Warn(fmt.Sprintf("Invalid error code %d. Not applying", code))
 		return s
 	}
 
@@ -141,7 +141,7 @@ func (s *Seer) UnmarshalJSON(data []byte) error {
 }
 
 // New creates a new Seer error with the given operation name and message.
-func New(operation string, message string, code ...int) error {
+func New(operation string, message string, code ...int) *Seer {
 	var (
 		caller string
 		file   string
@@ -182,7 +182,7 @@ Usage:
 	  return seer.Wrap("doThing", err, "failed to do the thing", 400)
 	}
 */
-func Wrap(op string, originalError error, customMessage ...string) error {
+func Wrap(op string, originalError error, customMessage ...string) *Seer {
 	seerError := Seer{op: op, originalError: originalError}
 
 	if len(customMessage) > 0 {
@@ -200,7 +200,7 @@ func Wrap(op string, originalError error, customMessage ...string) error {
 
 // Unlike `Wrap`, `WrapWithStackTrace` is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace regardess of the `collectRuntimeInfo` flag.
 // `operation` is the name of the operation that failed, to provide more context.
-func WrapWithStackTrace(operation string, originalError error, customMessage ...string) error {
+func WrapWithStackTrace(operation string, originalError error, customMessage ...string) *Seer {
 	var (
 		caller  string
 		file    string
@@ -264,4 +264,7 @@ func getRuntimeInfo() (string, string, int) {
 	return caller, file, line
 }
 
-var _ SeerInterface = (*Seer)(nil)
+var (
+	_ SeerInterface = (*Seer)(nil)
+	_ error         = (*Seer)(nil)
+)
