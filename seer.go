@@ -3,6 +3,7 @@ package seer
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"runtime"
 	"strings"
@@ -11,13 +12,16 @@ import (
 var (
 	funcSuffixRegex   = regexp.MustCompile(`\.(func\d+)$`)
 	collectStackTrace = true
-	defaultMessage    = "an error occurred"
+
+	defaultCode    = 500
+	defaultMessage = "an error occurred"
 )
 
 type Seer struct {
 	op            string
 	originalError error
 	message       string
+	code          int
 
 	// runtime info
 	caller string
@@ -32,39 +36,67 @@ type SeerInterface interface {
 	json.Unmarshaler
 }
 
+// Code returns the error code that was set on the Seer error.
+func (s *Seer) Code() int {
+	if s.code == 0 {
+		return defaultCode
+	}
+
+	return s.code
+}
+
+// WithCode sets the error code on the Seer error.
+func (s *Seer) WithCode(code int) *Seer {
+	if code < 100 || code > 599 {
+		slog.Warn(fmt.Sprintf("Invalid error code %d. Not applying", code))
+		return s
+	}
+
+	s.code = code
+	return s
+}
+
 // Error returns our user-defined error message, useful for direct responses to the user.
-func (s Seer) Error() string {
-	return s.message
+func (s *Seer) Error() string {
+	return s.message // message is always set to either user-defined message or default message
 }
 
 // Operation returns the operation name that was passed to the Seer error.
-func (s Seer) Operation() string {
+func (s *Seer) Operation() string {
 	return s.op
 }
 
 // OriginalError returns the original error that was wrapped by the Seer error.
-func (s Seer) OriginalError() error {
+func (s *Seer) OriginalError() error {
 	return s.originalError
 }
 
 // ErrorWithStackTrace returns the error message with a bit more details, useful for debugging and logging
-func (s Seer) ErrorWithStackTrace() string {
+func (s *Seer) ErrorWithStackTrace() string {
 	if collectStackTrace {
 		callerName := s.caller
-		return fmt.Sprintf("%s:%d (%s::%s): %s", s.file, s.line, callerName, s.op, s.message)
+		return fmt.Sprintf(
+			"%s:%d (%s::%s): %s, original_err=%s",
+			s.file,
+			s.line,
+			callerName,
+			s.op,
+			s.message,
+			s.originalError.Error(),
+		)
 	} else {
 		return fmt.Sprintf("%s: %s", s.op, s.message)
 	}
 }
 
 // UnwrapError returns the original error and a boolean indicating whether the original error is a Seer error and can be further unwrapped.
-func (s Seer) UnwrapError() (error, bool) {
-	_, nextErrorIsSeerError := s.originalError.(Seer)
+func (s *Seer) UnwrapError() (error, bool) {
+	_, nextErrorIsSeerError := s.originalError.(*Seer)
 	return s.originalError, nextErrorIsSeerError
 }
 
 // String returns a string representation of the Seer error (stack trace included if `collectStackTrace` is set to true) that is useful for logging.
-func (s Seer) String() string {
+func (s *Seer) String() string {
 	var sb strings.Builder
 
 	defer sb.Reset() // Deallocate the string builder
@@ -84,7 +116,7 @@ func (s Seer) String() string {
 }
 
 // MarshalJSON returns a JSON representation of the Seer error, satisfying the json.Marshaler interface.
-func (s Seer) MarshalJSON() ([]byte, error) {
+func (s *Seer) MarshalJSON() ([]byte, error) {
 	data := make(map[string]interface{})
 
 	data["operation"] = s.op
@@ -104,12 +136,12 @@ func (s Seer) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON is a no-op function that satisfies the json.Unmarshaler interface.
-func (s Seer) UnmarshalJSON(data []byte) error {
+func (s *Seer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
 // New creates a new Seer error with the given operation name and message.
-func New(operation string, message string) error {
+func New(operation string, message string, code ...int) *Seer {
 	var (
 		caller string
 		file   string
@@ -120,22 +152,37 @@ func New(operation string, message string) error {
 		caller, file, line = getRuntimeInfo()
 	}
 
-	return Seer{op: operation, message: message, file: file, caller: caller, line: line}
+	errCode := 500
+	if len(code) > 0 {
+		errCode = code[0]
+
+		if errCode < 100 || errCode > 599 {
+			slog.
+				Warn(fmt.Sprintf("Invalid error code %d. Defaulting to 500", errCode))
+			errCode = 500
+		}
+	}
+
+	return &Seer{
+		op:      operation,
+		message: message,
+		code:    errCode,
+		file:    file,
+		caller:  caller,
+		line:    line,
+	}
 }
 
 /*
-*
-* WrapError is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace.
-*
-* Usage:
-* ```go
-* if _, err := doThing(); err != nil {
-*   return seer.Wrap("doThing", err, "failed to do the thing")
-* }
-*````
-*
- */
-func Wrap(op string, originalError error, customMessage ...string) error {
+WrapError is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace.
+
+Usage:
+
+	if _, err := doThing(); err != nil {
+	  return seer.Wrap("doThing", err, "failed to do the thing", 400)
+	}
+*/
+func Wrap(op string, originalError error, customMessage ...string) *Seer {
 	seerError := Seer{op: op, originalError: originalError}
 
 	if len(customMessage) > 0 {
@@ -148,12 +195,12 @@ func Wrap(op string, originalError error, customMessage ...string) error {
 		seerError.caller, seerError.file, seerError.line = getRuntimeInfo()
 	}
 
-	return seerError
+	return &seerError
 }
 
 // Unlike `Wrap`, `WrapWithStackTrace` is a function that takes an operation name, an original error, and a custom message and returns a new error with a more informative stack trace regardess of the `collectRuntimeInfo` flag.
 // `operation` is the name of the operation that failed, to provide more context.
-func WrapWithStackTrace(operation string, originalError error, customMessage ...string) error {
+func WrapWithStackTrace(operation string, originalError error, customMessage ...string) *Seer {
 	var (
 		caller  string
 		file    string
@@ -169,7 +216,7 @@ func WrapWithStackTrace(operation string, originalError error, customMessage ...
 
 	caller, file, line = getRuntimeInfo()
 
-	return Seer{
+	return &Seer{
 		op:            operation,
 		originalError: originalError,
 		message:       message,
@@ -191,6 +238,15 @@ func SetCollectStackTrace(flag bool) {
 	collectStackTrace = flag
 }
 
+func SetDefaultCode(code int) {
+	if code < 100 || code > 599 {
+		slog.Warn(fmt.Sprintf("Invalid error code %d. Defaulting to 500", code))
+		return
+	}
+
+	defaultCode = code
+}
+
 func getRuntimeInfo() (string, string, int) {
 	pc, file, line, ok := runtime.Caller(2)
 	if !ok {
@@ -208,4 +264,7 @@ func getRuntimeInfo() (string, string, int) {
 	return caller, file, line
 }
 
-var _ SeerInterface = Seer{}
+var (
+	_ SeerInterface = (*Seer)(nil)
+	_ error         = (*Seer)(nil)
+)
