@@ -75,7 +75,15 @@ func (s *Seer) OriginalError() error {
 func (s *Seer) ErrorWithStackTrace() string {
 	if collectStackTrace {
 		callerName := s.caller
-		return fmt.Sprintf("%s:%d (%s::%s): %s", s.file, s.line, callerName, s.op, s.message)
+		return fmt.Sprintf(
+			"%s:%d (%s::%s): %s, original_err=%s",
+			s.file,
+			s.line,
+			callerName,
+			s.op,
+			s.message,
+			s.originalError.Error(),
+		)
 	} else {
 		return fmt.Sprintf("%s: %s", s.op, s.message)
 	}
