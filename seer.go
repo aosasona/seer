@@ -56,9 +56,19 @@ func (s *Seer) WithCode(code int) *Seer {
 	return s
 }
 
-// Error returns our user-defined error message, useful for direct responses to the user.
+// Error returns our user-defined error message if it was set, otherwise it returns the original error message.
+// WARNING: it returns the original error message for mostly use in logging, for user-facing error messages, use `Message` instead.
 func (s *Seer) Error() string {
+	if s.message == defaultMessage && s.originalError != nil {
+		return s.originalError.Error()
+	}
+
 	return s.message // message is always set to either user-defined message or default message
+}
+
+// Message returns the user-defined error message that was passed to the Seer error, or the default message if a custom message was not provided.
+func (s *Seer) Message() string {
+	return s.message
 }
 
 // Operation returns the operation name that was passed to the Seer error.
