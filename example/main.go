@@ -9,6 +9,7 @@ import (
 func main() {
 	if err := run(); err != nil {
 		fmt.Printf("Error: %s, Code: %d\n", err, err.(*seer.Seer).Code())
+		fmt.Print(err.(*seer.Seer).ErrorWithStackTrace())
 	}
 }
 

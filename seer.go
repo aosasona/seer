@@ -86,7 +86,7 @@ func (s *Seer) ErrorWithStackTrace() string {
 	if collectStackTrace {
 		callerName := s.caller
 
-		var originalError string
+		originalError := "nil"
 		if s.originalError != nil {
 			originalError = s.originalError.Error()
 		}
@@ -180,12 +180,14 @@ func New(operation string, message string, code ...int) *Seer {
 	}
 
 	return &Seer{
-		op:      operation,
-		message: message,
-		code:    errCode,
-		file:    file,
-		caller:  caller,
-		line:    line,
+		op:            operation,
+		message:       message,
+		originalError: nil,
+		code:          errCode,
+
+		caller: caller,
+		file:   file,
+		line:   line,
 	}
 }
 
